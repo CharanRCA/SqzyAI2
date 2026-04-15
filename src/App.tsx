@@ -684,7 +684,9 @@ If the user is asking you to modify an existing file, output the ENTIRE updated 
           method: "POST",
           headers: {
             "Authorization": `Bearer ${keyToUse}`,
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "HTTP-Referer": window.location.href,
+            "X-Title": "Squeeze IDE"
           },
           body: JSON.stringify({
             model: selectedModelObj.id,
@@ -692,6 +694,11 @@ If the user is asking you to modify an existing file, output the ENTIRE updated 
             stream: true
           })
         });
+
+        if (!res.ok) {
+           const errorText = await res.text();
+           throw new Error(`OpenRouter API Error (${res.status}): ${errorText}`);
+        }
 
         const reader = res.body?.getReader();
         const decoder = new TextDecoder();
