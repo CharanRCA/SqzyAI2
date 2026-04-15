@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import {
   Plus,
   RotateCw,
@@ -219,24 +219,16 @@ loader.config({
 });
 
 const AI_MODELS = [
-  // Puter.js (free, no key needed)
-  { id: 'gpt-5.4-nano', name: 'GPT-5.4 Nano (OpenAI)', provider: 'puter' },
-  { id: 'mercury-2', name: 'Mercury 2 (Inception)', provider: 'puter' },
-  { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Anthropic)', provider: 'puter' },
-  { id: 'claude-opus-4-6', name: 'Claude Opus 4.6 (Anthropic)', provider: 'puter' },
-  { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview (Google)', provider: 'puter' },
-  { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite (Google)', provider: 'puter' },
-  { id: 'glm-5.1', name: 'GLM-5.1 (Z-AI)', provider: 'puter' },
-  // OpenRouter (needs API key)
-  { id: 'nvidia/nemotron-3-super-120b-a12b:free', name: 'Nemotron 3 Super 120B (NVIDIA)', provider: 'openrouter' },
-  { id: 'arcee-ai/trinity-large-preview:free', name: 'Trinity Large (Arcee AI)', provider: 'openrouter' },
-  { id: 'minimax/minimax-m2.5:free', name: 'MiniMax M2.5 (MiniMax)', provider: 'openrouter' },
-  // g4f.dev (free, no key)
-  { id: 'models/gemini-3-flash-preview', name: 'Gemini 3 Flash Preview (Google)', provider: 'g4f', g4fClient: 'gemini' },
-  { id: 'openai', name: 'ChatGPT-5.4 Nano (OpenAI via Pollinations)', provider: 'g4f', g4fClient: 'pollinations' },
-  { id: 'minimax-m2.7', name: 'MiniMax M2.7 (via Ollama)', provider: 'g4f', g4fClient: 'ollama' },
-  { id: 'zai-org/GLM-5.1', name: 'GLM-5.1 (Z-AI via DeepInfra)', provider: 'g4f', g4fClient: 'deepinfra' },
-  { id: 'gpt-5-2-thinking', name: 'GPT-5.2 Thinking (OpenAI)', provider: 'g4f', g4fClient: 'OpenaiAccount' },
+  { id: 'gpt-5.4-nano', name: 'openai/gpt-5.4-nano', provider: 'puter' },
+  { id: 'mercury-2', name: 'inception/mercury-2', provider: 'puter' },
+  { id: 'claude-sonnet-4-6', name: 'anthropic/claude-sonnet-4-6', provider: 'puter' },
+  { id: 'claude-opus-4-6', name: 'anthropic/claude-opus-4-6', provider: 'puter' },
+  { id: 'gemini-3.1-pro-preview', name: 'google/gemini-3.1-pro-preview', provider: 'puter' },
+  { id: 'gemini-3.1-flash-lite-preview', name: 'google/gemini-3.1-flash-lite-preview', provider: 'puter' },
+  { id: 'glm-5.1', name: 'z-ai/glm-5.1', provider: 'puter' },
+  { id: 'nvidia/nemotron-3-super-120b-a12b:free', name: 'nvidia/nemotron-3-super-120b-a12b:free', provider: 'openrouter' },
+  { id: 'arcee-ai/trinity-large-preview:free', name: 'arcee-ai/trinity-large-preview:free', provider: 'openrouter' },
+  { id: 'minimax/minimax-m2.5:free', name: 'minimax/minimax-m2.5:free', provider: 'openrouter' },
 ];
 
 // --- MAIN APP ---
@@ -262,13 +254,6 @@ export default function App() {
   const [selectedParentNode, setSelectedParentNode] = useState<FileNode | null>(null);
 
   const editorRef = useRef<any>(null);
-  const saveTimeoutRef = useRef<any>(null);
-  
-  const tabsRef = useRef(tabs);
-  useEffect(() => { tabsRef.current = tabs; }, [tabs]);
-
-  const activeTabIndexRef = useRef(activeTabIndex);
-  useEffect(() => { activeTabIndexRef.current = activeTabIndex; }, [activeTabIndex]);
 
   // --- FILE SYSTEM LOGIC ---
 
@@ -417,11 +402,9 @@ export default function App() {
   };
 
   const saveCurrentFile = async () => {
-    const activeIndex = activeTabIndexRef.current;
-    if (activeIndex === null || !tabsRef.current[activeIndex]) return;
-    
-    const tab = tabsRef.current[activeIndex];
-    const content = editorRef.current?.getValue() || '';
+    if (activeTabIndex === null || !tabs[activeTabIndex]) return;
+    const tab = tabs[activeTabIndex];
+    const content = editorRef.current?.getValue();
 
     if (tab.handle) {
       try {
@@ -429,76 +412,13 @@ export default function App() {
         await writable.write(content);
         await writable.close();
 
-        setTabs(prev => {
-            const newTabs = [...prev];
-            if (newTabs[activeIndex]) newTabs[activeIndex] = { ...newTabs[activeIndex], content, isModified: false };
-            return newTabs;
-        });
+        const newTabs = [...tabs];
+        newTabs[activeTabIndex] = { ...tab, content, isModified: false };
+        setTabs(newTabs);
       } catch (err) {
         console.error(err);
       }
-    } else if (rojoDirHandle) {
-       try {
-          const parts = tab.path.split('/');
-          const service = parts[0];
-          const fileName = parts[parts.length - 1];
-          
-          let folderName = service;
-          if (service === 'ServerScriptService') folderName = 'server';
-          else if (service === 'StarterPlayer' || service === 'StarterPlayerScripts' || service === 'StarterCharacterScripts') folderName = 'client';
-          else if (service === 'ReplicatedStorage') folderName = 'shared';
-          else folderName = service.toLowerCase();
-          
-          const srcHandle = await rojoDirHandle.getDirectoryHandle('src', { create: true });
-          const serviceHandle = await srcHandle.getDirectoryHandle(folderName, { create: true });
-          
-          let currentDir = serviceHandle;
-          for (let i = 1; i < parts.length - 1; i++) {
-             currentDir = await currentDir.getDirectoryHandle(parts[i], { create: true });
-          }
-          
-          const fileHandle = await currentDir.getFileHandle(fileName, { create: true });
-          const writable = await (fileHandle as any).createWritable();
-          await writable.write(content);
-          await writable.close();
-          
-          setTabs(prev => {
-             const newTabs = [...prev];
-             if (newTabs[activeIndex]) {
-                newTabs[activeIndex] = { ...newTabs[activeIndex], content, isModified: false, handle: fileHandle as any };
-             }
-             return newTabs;
-          });
-          refreshFileTree(rojoDirHandle);
-       } catch (err) {
-          console.error('Auto-create failed:', err);
-       }
-    } else {
-       setTabs(prev => {
-           const newTabs = [...prev];
-           if (newTabs[activeIndex]) newTabs[activeIndex] = { ...newTabs[activeIndex], content, isModified: false };
-           return newTabs;
-       });
     }
-  };
-
-  const handleEditorChange = (value: string | undefined) => {
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    
-    if (activeTabIndexRef.current !== null) {
-      setTabs(prev => {
-        const next = [...prev];
-        const idx = activeTabIndexRef.current!;
-        if (next[idx] && next[idx].content !== value) {
-            next[idx] = { ...next[idx], content: value || '', isModified: true };
-        }
-        return next;
-      });
-    }
-
-    saveTimeoutRef.current = setTimeout(() => {
-       saveCurrentFile();
-    }, 1000);
   };
 
   // --- MONACO SETUP ---
@@ -663,76 +583,19 @@ export default function App() {
       const selectedModelObj = AI_MODELS.find(m => m.id === activeModelId) || AI_MODELS[0];
       let aiResponseText = "";
 
-      const buildTreeString = (nodes: FileNode[], prefix = '') => {
-         return nodes.map(n => {
-            let str = `${prefix}- ${n.name}`;
-            if (n.children && n.children.length > 0) {
-               str += '\n' + buildTreeString(n.children, prefix + '  ');
-            }
-            return str;
-         }).join('\n');
-      };
-      const treeContext = buildTreeString(fileTree);
-
       const activeFile = activeTabIndex !== null ? tabs[activeTabIndex] : null;
-      const modeInstructions = {
-        agentic: `You are in AGENTIC mode. Write complete, production-ready Luau code directly to the editor. Do not ask for confirmation — just build it. Write all necessary scripts across all required services (server, client, shared modules). Be thorough: implement error handling, type annotations, and proper service architecture.`,
-        planning: `You are in PLANNING mode. Before writing any code, output a clear architecture plan as a short chat message. List which scripts you'll create, which services they belong to, and how they communicate (RemoteEvents, RemoteFunctions, etc.). Then write all the code.`,
-        debugging: `You are in DEBUGGING mode. Carefully analyze the current file for bugs, anti-patterns, performance issues, memory leaks, and security vulnerabilities. Explain each issue found, then output the fully corrected file.`
-      };
-
-      let systemPrompt = `You are an elite, autonomous Roblox AI Engineer embedded inside Squeeze IDE — a professional Roblox development environment with Rojo file sync.
-
-## Your Identity
-You are not a chatbot. You are a Roblox systems engineer. You write clean, idiomatic Luau that follows the strict Roblox architecture patterns used in production games. You know the difference between server authority and client prediction. You understand replication, sandboxing, and the Roblox security model deeply.
-
-## Current Mode
-${modeInstructions[mode] || modeInstructions.agentic}
-
-## Roblox Architecture Rules (CRITICAL — never violate these)
-- **Server authority**: All game logic that affects game state (damage, currency, inventory) MUST live in ServerScriptService. Never trust the client.
-- **Client scripts**: LocalScripts go in StarterPlayerScripts (under StarterPlayer) or StarterCharacterScripts. They handle UI, input, visual feedback, and optimistic client-side prediction only.
-- **Module pattern**: Shared data types, constants, utility functions, and class modules go in ReplicatedStorage as ModuleScript files. They are required with \`require()\`.
-- **RemoteEvents vs RemoteFunctions**: Use RemoteEvent for fire-and-forget (client→server actions, server→client updates). Use RemoteFunction only when a return value is strictly needed.
-- **BindableEvents**: Use only for same-side (server↔server or client↔client) communication.
-- **Services**: Always get services at the top of each script via \`local ReplicatedStorage = game:GetService("ReplicatedStorage")\`.
-- **task library**: Always use \`task.spawn\`, \`task.delay\`, \`task.wait\` instead of deprecated \`spawn\`, \`delay\`, \`wait\`.
-- **Type safety**: Use Luau type annotations. Annotate function signatures, module return types, and key variables.
-- **Error handling**: Wrap network calls and I/O in pcall/xpcall where appropriate.
-- **Memory management**: Disconnect events when objects are destroyed using \`Maid\` pattern or \`instance.Destroying\` signal.
-
-## Current Workspace / Rojo Structure
-<workspace_tree>
-${treeContext || "(No folder connected — assume standard Roblox services: ServerScriptService, ReplicatedStorage/Shared, StarterPlayer/StarterPlayerScripts, StarterGui, etc.)"}
-</workspace_tree>
-
-## File Output Format (STRICT)
-When writing code, use this XML tag format. The path must match the Rojo structure:
-
-<file path="ServerScriptService/GameLogic.server.luau">
--- Complete file content here
+      let systemPrompt = `You are an expert Roblox Lua/Luau autonomous coding agent. 
+The chat interface is strictly for instructions, reasoning, terminology, and normal conversation. DO NOT output code blocks like \`\`\`lua in the chat.
+Coding ALWAYS happens in the editor natively. To write, modify, or create a script, you MUST use the following exact XML format:
+<file path="Full/Path/To/Script.luau">
+-- Your complete code here
 </file>
 
-<file path="ReplicatedStorage/Shared/GameConfig.luau">
--- Another file here
-</file>
-
-Rules:
-- Paths follow Rojo conventions: \`ServerScriptService/\`, \`StarterPlayer/StarterPlayerScripts/\`, \`ReplicatedStorage/Shared/\`
-- \`.server.luau\` = Script (runs on server only)
-- \`.client.luau\` = LocalScript (runs on client only)
-- \`.luau\` = ModuleScript (required by both sides)
-- If modifying an existing file, output the ENTIRE file — never partial snippets
-- ONLY output \`<file>\` tags when writing code. Do not wrap them in markdown fences.
-- If you have something brief to say (e.g. in planning mode), say it BEFORE the file tags, then write the code. Never explain after.`;
+You can create documents wherever and whenever you want. Always provide the full absolute path such as "ServerScriptService/Main.server.luau".
+If the user is asking you to modify an existing file, output the ENTIRE updated file content within the <file> tags.`;
 
       if (activeFile && editorRef.current) {
-        systemPrompt += `\n\n## Currently Open File
-The user has this file open and focused: \`${activeFile.path}\`
-<current_file path="${activeFile.path}">
-${editorRef.current.getValue()}
-</current_file>
-If the user asks to modify or debug this file, output the full updated version in a \`<file path="${activeFile.path}">\` tag.`;
+        systemPrompt += `\n\nThe user is currently focusing on this file path: '${activeFile.path}'.\nHere is its current content:\n<current_file>\n${editorRef.current.getValue()}\n</current_file>\n`;
       }
 
       setMessages(prev => [...prev, { role: 'assistant', content: 'Thinking...' }]);
@@ -807,23 +670,6 @@ If the user asks to modify or debug this file, output the full updated version i
           fullResponse = typeof response === 'string' ? response : (response?.message?.content || response?.text || JSON.stringify(response));
           processResponseText(fullResponse);
         }
-      } else if (selectedModelObj.provider === 'g4f') {
-        const { createClient } = await new Function('return import("https://g4f.dev/dist/js/providers.js")')();
-        const client = createClient(selectedModelObj.g4fClient);
-        
-        const messagesToSend = [
-          { role: "system", content: systemPrompt },
-          ...messages.map(m => ({ role: m.role, content: m.content })).filter(m => m.role !== 'system'),
-          { role: "user", content: currentInput }
-        ];
-
-        const response = await client.chat.completions.create({
-            model: selectedModelObj.id,
-            messages: messagesToSend
-        });
-
-        fullResponse = response.choices?.[0]?.message?.content || "";
-        processResponseText(fullResponse);
       } else {
         const defaultKey = import.meta.env.VITE_OPENROUTER_API_KEY || "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";
         const keyToUse = apiKey || defaultKey;
@@ -891,12 +737,8 @@ If the user asks to modify or debug this file, output the full updated version i
       setMessages(prev => {
         const newM = [...prev];
         const lastMsg = newM[newM.length - 1];
-        if (lastMsg && lastMsg.role === 'assistant') {
-          if (!lastMsg.content.trim() || lastMsg.content === 'Coding...' || lastMsg.content === 'Thinking...') {
-            newM.pop();
-          } else {
-            newM[newM.length - 1] = { ...lastMsg, content: lastMsg.content.trim() };
-          }
+        if (lastMsg && lastMsg.role === 'assistant' && (lastMsg.content === 'Coding...' || lastMsg.content === 'Thinking...')) {
+          newM[newM.length - 1] = { ...lastMsg, content: `I have updated the files in your editor.` };
         }
         return newM;
       });
@@ -1067,7 +909,6 @@ If the user asks to modify or debug this file, output the full updated version i
                 value={tabs[activeTabIndex]?.content}
                 beforeMount={handleEditorWillMount}
                 onMount={handleEditorDidMount}
-                onChange={handleEditorChange}
               />
             )}
           </div>
@@ -1172,17 +1013,12 @@ If the user asks to modify or debug this file, output the full updated version i
                 className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[11px] text-lime-400 outline-none cursor-pointer hover:bg-white/10 focus:border-lime-400/50 focus:bg-[#1a1a24] transition-all"
                 title="Select AI Model"
               >
-                <optgroup label="Puter.js — Free, No Key">
+                <optgroup label="Puter.js Models (Free)">
                   {AI_MODELS.filter(m => m.provider === 'puter').map(m => (
                     <option key={m.id} value={m.id}>{m.name}</option>
                   ))}
                 </optgroup>
-                <optgroup label="g4f.dev — Free, No Key">
-                  {AI_MODELS.filter(m => m.provider === 'g4f').map(m => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                  ))}
-                </optgroup>
-                <optgroup label="OpenRouter — Needs API Key">
+                <optgroup label="OpenRouter Models">
                   {AI_MODELS.filter(m => m.provider === 'openrouter').map(m => (
                     <option key={m.id} value={m.id}>{m.name}</option>
                   ))}
