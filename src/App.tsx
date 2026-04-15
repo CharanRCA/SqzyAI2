@@ -235,8 +235,7 @@ const AI_MODELS = [
 
 export default function App() {
   const [activeModelId, setActiveModelId] = useState(() => localStorage.getItem('sq_model') || 'gpt-5.4-nano');
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('sq_api_key') || '');
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('sq_api_key') || '');
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('sq_api_key') || import.meta.env.VITE_OPENROUTER_API_KEY || '');
   const [mode, setMode] = useState<'agentic' | 'planning' | 'debugging'>('agentic');
 
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
@@ -672,7 +671,7 @@ If the user is asking you to modify an existing file, output the ENTIRE updated 
           processResponseText(fullResponse);
         }
       } else {
-        const defaultKey = "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";
+        const defaultKey = import.meta.env.VITE_OPENROUTER_API_KEY || "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";
         const keyToUse = apiKey || defaultKey;
 
         const messagesToSend = [
