@@ -229,6 +229,11 @@ const AI_MODELS = [
   { id: 'nvidia/nemotron-3-super-120b-a12b:free', name: 'nvidia/nemotron-3-super-120b-a12b:free', provider: 'openrouter' },
   { id: 'arcee-ai/trinity-large-preview:free', name: 'arcee-ai/trinity-large-preview:free', provider: 'openrouter' },
   { id: 'minimax/minimax-m2.5:free', name: 'minimax/minimax-m2.5:free', provider: 'openrouter' },
+  { id: 'models/gemini-3-flash-preview', name: 'Gemini 3.1 Flash (g4f)', provider: 'g4f', g4fClient: 'gemini' },
+  { id: 'openai', name: 'openai (g4f pollinations)', provider: 'g4f', g4fClient: 'pollinations' },
+  { id: 'minimax-m2.7', name: 'minimax-m2.7 (g4f ollama)', provider: 'g4f', g4fClient: 'ollama' },
+  { id: 'zai-org/GLM-5.1', name: 'zai-org/GLM-5.1 (g4f)', provider: 'g4f', g4fClient: 'deepinfra' },
+  { id: 'gpt-5-2-thinking', name: 'gpt-5-2-thinking (g4f)', provider: 'g4f', g4fClient: 'OpenaiAccount' },
 ];
 
 // --- MAIN APP ---
@@ -254,6 +259,13 @@ export default function App() {
   const [selectedParentNode, setSelectedParentNode] = useState<FileNode | null>(null);
 
   const editorRef = useRef<any>(null);
+  const saveTimeoutRef = useRef<any>(null);
+  
+  const tabsRef = useRef(tabs);
+  useEffect(() => { tabsRef.current = tabs; }, [tabs]);
+
+  const activeTabIndexRef = useRef(activeTabIndex);
+  useEffect(() => { activeTabIndexRef.current = activeTabIndex; }, [activeTabIndex]);
 
   // --- FILE SYSTEM LOGIC ---
 
@@ -402,9 +414,11 @@ export default function App() {
   };
 
   const saveCurrentFile = async () => {
-    if (activeTabIndex === null || !tabs[activeTabIndex]) return;
-    const tab = tabs[activeTabIndex];
-    const content = editorRef.current?.getValue();
+    const activeIndex = activeTabIndexRef.current;
+    if (activeIndex === null || !tabsRef.current[activeIndex]) return;
+    
+    const tab = tabsRef.current[activeIndex];
+    const content = editorRef.current?.getValue() || '';
 
     if (tab.handle) {
       try {
@@ -412,13 +426,76 @@ export default function App() {
         await writable.write(content);
         await writable.close();
 
-        const newTabs = [...tabs];
-        newTabs[activeTabIndex] = { ...tab, content, isModified: false };
-        setTabs(newTabs);
+        setTabs(prev => {
+            const newTabs = [...prev];
+            if (newTabs[activeIndex]) newTabs[activeIndex] = { ...newTabs[activeIndex], content, isModified: false };
+            return newTabs;
+        });
       } catch (err) {
         console.error(err);
       }
+    } else if (rojoDirHandle) {
+       try {
+          const parts = tab.path.split('/');
+          const service = parts[0];
+          const fileName = parts[parts.length - 1];
+          
+          let folderName = service;
+          if (service === 'ServerScriptService') folderName = 'server';
+          else if (service === 'StarterPlayer' || service === 'StarterPlayerScripts' || service === 'StarterCharacterScripts') folderName = 'client';
+          else if (service === 'ReplicatedStorage') folderName = 'shared';
+          else folderName = service.toLowerCase();
+          
+          const srcHandle = await rojoDirHandle.getDirectoryHandle('src', { create: true });
+          const serviceHandle = await srcHandle.getDirectoryHandle(folderName, { create: true });
+          
+          let currentDir = serviceHandle;
+          for (let i = 1; i < parts.length - 1; i++) {
+             currentDir = await currentDir.getDirectoryHandle(parts[i], { create: true });
+          }
+          
+          const fileHandle = await currentDir.getFileHandle(fileName, { create: true });
+          const writable = await (fileHandle as any).createWritable();
+          await writable.write(content);
+          await writable.close();
+          
+          setTabs(prev => {
+             const newTabs = [...prev];
+             if (newTabs[activeIndex]) {
+                newTabs[activeIndex] = { ...newTabs[activeIndex], content, isModified: false, handle: fileHandle as any };
+             }
+             return newTabs;
+          });
+          refreshFileTree(rojoDirHandle);
+       } catch (err) {
+          console.error('Auto-create failed:', err);
+       }
+    } else {
+       setTabs(prev => {
+           const newTabs = [...prev];
+           if (newTabs[activeIndex]) newTabs[activeIndex] = { ...newTabs[activeIndex], content, isModified: false };
+           return newTabs;
+       });
     }
+  };
+
+  const handleEditorChange = (value: string | undefined) => {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    
+    if (activeTabIndexRef.current !== null) {
+      setTabs(prev => {
+        const next = [...prev];
+        const idx = activeTabIndexRef.current!;
+        if (next[idx] && next[idx].content !== value) {
+            next[idx] = { ...next[idx], content: value || '', isModified: true };
+        }
+        return next;
+      });
+    }
+
+    saveTimeoutRef.current = setTimeout(() => {
+       saveCurrentFile();
+    }, 1000);
   };
 
   // --- MONACO SETUP ---
@@ -583,16 +660,34 @@ export default function App() {
       const selectedModelObj = AI_MODELS.find(m => m.id === activeModelId) || AI_MODELS[0];
       let aiResponseText = "";
 
+      const buildTreeString = (nodes: FileNode[], prefix = '') => {
+         return nodes.map(n => {
+            let str = `${prefix}- ${n.name}`;
+            if (n.children && n.children.length > 0) {
+               str += '\n' + buildTreeString(n.children, prefix + '  ');
+            }
+            return str;
+         }).join('\n');
+      };
+      const treeContext = buildTreeString(fileTree);
+
       const activeFile = activeTabIndex !== null ? tabs[activeTabIndex] : null;
-      let systemPrompt = `You are an expert Roblox Lua/Luau autonomous coding agent. 
-The chat interface is strictly for instructions, reasoning, terminology, and normal conversation. DO NOT output code blocks like \`\`\`lua in the chat.
-Coding ALWAYS happens in the editor natively. To write, modify, or create a script, you MUST use the following exact XML format:
-<file path="Full/Path/To/Script.luau">
--- Your complete code here
+      let systemPrompt = `You are a highly specialized autonomous Roblox AI Agent embedded directly into Squeeze Editor with Rojo integration.
+Your task is to write Lua/Luau scripts exactly where they belong in the game's architecture. Do NOT output code wrapped in \`\`\`lua in your chat messages. 
+
+Here is the current layout of the Roblox workspace / Rojo structure:
+<workspace_tree>
+${treeContext || "(No folder connected. Assume standard Roblox services like ServerScriptService, ReplicatedStorage, StarterPlayer, etc.)"}
+</workspace_tree>
+
+When creating or editing files, you must use the strict XML tag format exactly as shown to write natively to the editor. Squeeze will map your files directly to Rojo! Let's say you write a script for the server, you should path it to 'ServerScriptService/CoreLogic.server.luau'. 
+
+<file path="ServerScriptService/GameLogic.server.luau">
+-- Complete file code goes here
 </file>
 
-You can create documents wherever and whenever you want. Always provide the full absolute path such as "ServerScriptService/Main.server.luau".
-If the user is asking you to modify an existing file, output the ENTIRE updated file content within the <file> tags.`;
+If the user asks you to modify code, rewrite the ENTIRE updated file content within the <file> tags.
+ONLY output the <file> tags if you are writing code. NO CHAT BUBBLES EXPLAINING THE CODE AFTERWARDS. Just write the code natively to the editor.`;
 
       if (activeFile && editorRef.current) {
         systemPrompt += `\n\nThe user is currently focusing on this file path: '${activeFile.path}'.\nHere is its current content:\n<current_file>\n${editorRef.current.getValue()}\n</current_file>\n`;
@@ -670,6 +765,23 @@ If the user is asking you to modify an existing file, output the ENTIRE updated 
           fullResponse = typeof response === 'string' ? response : (response?.message?.content || response?.text || JSON.stringify(response));
           processResponseText(fullResponse);
         }
+      } else if (selectedModelObj.provider === 'g4f') {
+        const { createClient } = await new Function('return import("https://g4f.dev/dist/js/providers.js")')();
+        const client = createClient(selectedModelObj.g4fClient);
+        
+        const messagesToSend = [
+          { role: "system", content: systemPrompt },
+          ...messages.map(m => ({ role: m.role, content: m.content })).filter(m => m.role !== 'system'),
+          { role: "user", content: currentInput }
+        ];
+
+        const response = await client.chat.completions.create({
+            model: selectedModelObj.id,
+            messages: messagesToSend
+        });
+
+        fullResponse = response.choices?.[0]?.message?.content || "";
+        processResponseText(fullResponse);
       } else {
         const defaultKey = import.meta.env.VITE_OPENROUTER_API_KEY || "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";
         const keyToUse = apiKey || defaultKey;
@@ -737,8 +849,12 @@ If the user is asking you to modify an existing file, output the ENTIRE updated 
       setMessages(prev => {
         const newM = [...prev];
         const lastMsg = newM[newM.length - 1];
-        if (lastMsg && lastMsg.role === 'assistant' && (lastMsg.content === 'Coding...' || lastMsg.content === 'Thinking...')) {
-          newM[newM.length - 1] = { ...lastMsg, content: `I have updated the files in your editor.` };
+        if (lastMsg && lastMsg.role === 'assistant') {
+          if (!lastMsg.content.trim() || lastMsg.content === 'Coding...' || lastMsg.content === 'Thinking...') {
+            newM.pop();
+          } else {
+            newM[newM.length - 1] = { ...lastMsg, content: lastMsg.content.trim() };
+          }
         }
         return newM;
       });
@@ -909,6 +1025,7 @@ If the user is asking you to modify an existing file, output the ENTIRE updated 
                 value={tabs[activeTabIndex]?.content}
                 beforeMount={handleEditorWillMount}
                 onMount={handleEditorDidMount}
+                onChange={handleEditorChange}
               />
             )}
           </div>
