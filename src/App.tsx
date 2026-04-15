@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   Plus,
   RotateCw,
@@ -219,21 +219,24 @@ loader.config({
 });
 
 const AI_MODELS = [
-  { id: 'gpt-5.4-nano', name: 'openai/gpt-5.4-nano', provider: 'puter' },
-  { id: 'mercury-2', name: 'inception/mercury-2', provider: 'puter' },
-  { id: 'claude-sonnet-4-6', name: 'anthropic/claude-sonnet-4-6', provider: 'puter' },
-  { id: 'claude-opus-4-6', name: 'anthropic/claude-opus-4-6', provider: 'puter' },
-  { id: 'gemini-3.1-pro-preview', name: 'google/gemini-3.1-pro-preview', provider: 'puter' },
-  { id: 'gemini-3.1-flash-lite-preview', name: 'google/gemini-3.1-flash-lite-preview', provider: 'puter' },
-  { id: 'glm-5.1', name: 'z-ai/glm-5.1', provider: 'puter' },
-  { id: 'nvidia/nemotron-3-super-120b-a12b:free', name: 'nvidia/nemotron-3-super-120b-a12b:free', provider: 'openrouter' },
-  { id: 'arcee-ai/trinity-large-preview:free', name: 'arcee-ai/trinity-large-preview:free', provider: 'openrouter' },
-  { id: 'minimax/minimax-m2.5:free', name: 'minimax/minimax-m2.5:free', provider: 'openrouter' },
-  { id: 'models/gemini-3-flash-preview', name: 'Gemini 3.1 Flash (g4f)', provider: 'g4f', g4fClient: 'gemini' },
-  { id: 'openai', name: 'openai (g4f pollinations)', provider: 'g4f', g4fClient: 'pollinations' },
-  { id: 'minimax-m2.7', name: 'minimax-m2.7 (g4f ollama)', provider: 'g4f', g4fClient: 'ollama' },
-  { id: 'zai-org/GLM-5.1', name: 'zai-org/GLM-5.1 (g4f)', provider: 'g4f', g4fClient: 'deepinfra' },
-  { id: 'gpt-5-2-thinking', name: 'gpt-5-2-thinking (g4f)', provider: 'g4f', g4fClient: 'OpenaiAccount' },
+  // Puter.js (free, no key needed)
+  { id: 'gpt-5.4-nano', name: 'GPT-5.4 Nano (OpenAI)', provider: 'puter' },
+  { id: 'mercury-2', name: 'Mercury 2 (Inception)', provider: 'puter' },
+  { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Anthropic)', provider: 'puter' },
+  { id: 'claude-opus-4-6', name: 'Claude Opus 4.6 (Anthropic)', provider: 'puter' },
+  { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview (Google)', provider: 'puter' },
+  { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite (Google)', provider: 'puter' },
+  { id: 'glm-5.1', name: 'GLM-5.1 (Z-AI)', provider: 'puter' },
+  // OpenRouter (needs API key)
+  { id: 'nvidia/nemotron-3-super-120b-a12b:free', name: 'Nemotron 3 Super 120B (NVIDIA)', provider: 'openrouter' },
+  { id: 'arcee-ai/trinity-large-preview:free', name: 'Trinity Large (Arcee AI)', provider: 'openrouter' },
+  { id: 'minimax/minimax-m2.5:free', name: 'MiniMax M2.5 (MiniMax)', provider: 'openrouter' },
+  // g4f.dev (free, no key)
+  { id: 'models/gemini-3-flash-preview', name: 'Gemini 3 Flash Preview (Google)', provider: 'g4f', g4fClient: 'gemini' },
+  { id: 'openai', name: 'ChatGPT-5.4 Nano (OpenAI via Pollinations)', provider: 'g4f', g4fClient: 'pollinations' },
+  { id: 'minimax-m2.7', name: 'MiniMax M2.7 (via Ollama)', provider: 'g4f', g4fClient: 'ollama' },
+  { id: 'zai-org/GLM-5.1', name: 'GLM-5.1 (Z-AI via DeepInfra)', provider: 'g4f', g4fClient: 'deepinfra' },
+  { id: 'gpt-5-2-thinking', name: 'GPT-5.2 Thinking (OpenAI)', provider: 'g4f', g4fClient: 'OpenaiAccount' },
 ];
 
 // --- MAIN APP ---
@@ -672,25 +675,64 @@ export default function App() {
       const treeContext = buildTreeString(fileTree);
 
       const activeFile = activeTabIndex !== null ? tabs[activeTabIndex] : null;
-      let systemPrompt = `You are a highly specialized autonomous Roblox AI Agent embedded directly into Squeeze Editor with Rojo integration.
-Your task is to write Lua/Luau scripts exactly where they belong in the game's architecture. Do NOT output code wrapped in \`\`\`lua in your chat messages. 
+      const modeInstructions = {
+        agentic: `You are in AGENTIC mode. Write complete, production-ready Luau code directly to the editor. Do not ask for confirmation — just build it. Write all necessary scripts across all required services (server, client, shared modules). Be thorough: implement error handling, type annotations, and proper service architecture.`,
+        planning: `You are in PLANNING mode. Before writing any code, output a clear architecture plan as a short chat message. List which scripts you'll create, which services they belong to, and how they communicate (RemoteEvents, RemoteFunctions, etc.). Then write all the code.`,
+        debugging: `You are in DEBUGGING mode. Carefully analyze the current file for bugs, anti-patterns, performance issues, memory leaks, and security vulnerabilities. Explain each issue found, then output the fully corrected file.`
+      };
 
-Here is the current layout of the Roblox workspace / Rojo structure:
+      let systemPrompt = `You are an elite, autonomous Roblox AI Engineer embedded inside Squeeze IDE — a professional Roblox development environment with Rojo file sync.
+
+## Your Identity
+You are not a chatbot. You are a Roblox systems engineer. You write clean, idiomatic Luau that follows the strict Roblox architecture patterns used in production games. You know the difference between server authority and client prediction. You understand replication, sandboxing, and the Roblox security model deeply.
+
+## Current Mode
+${modeInstructions[mode] || modeInstructions.agentic}
+
+## Roblox Architecture Rules (CRITICAL — never violate these)
+- **Server authority**: All game logic that affects game state (damage, currency, inventory) MUST live in ServerScriptService. Never trust the client.
+- **Client scripts**: LocalScripts go in StarterPlayerScripts (under StarterPlayer) or StarterCharacterScripts. They handle UI, input, visual feedback, and optimistic client-side prediction only.
+- **Module pattern**: Shared data types, constants, utility functions, and class modules go in ReplicatedStorage as ModuleScript files. They are required with \`require()\`.
+- **RemoteEvents vs RemoteFunctions**: Use RemoteEvent for fire-and-forget (client→server actions, server→client updates). Use RemoteFunction only when a return value is strictly needed.
+- **BindableEvents**: Use only for same-side (server↔server or client↔client) communication.
+- **Services**: Always get services at the top of each script via \`local ReplicatedStorage = game:GetService("ReplicatedStorage")\`.
+- **task library**: Always use \`task.spawn\`, \`task.delay\`, \`task.wait\` instead of deprecated \`spawn\`, \`delay\`, \`wait\`.
+- **Type safety**: Use Luau type annotations. Annotate function signatures, module return types, and key variables.
+- **Error handling**: Wrap network calls and I/O in pcall/xpcall where appropriate.
+- **Memory management**: Disconnect events when objects are destroyed using \`Maid\` pattern or \`instance.Destroying\` signal.
+
+## Current Workspace / Rojo Structure
 <workspace_tree>
-${treeContext || "(No folder connected. Assume standard Roblox services like ServerScriptService, ReplicatedStorage, StarterPlayer, etc.)"}
+${treeContext || "(No folder connected — assume standard Roblox services: ServerScriptService, ReplicatedStorage/Shared, StarterPlayer/StarterPlayerScripts, StarterGui, etc.)"}
 </workspace_tree>
 
-When creating or editing files, you must use the strict XML tag format exactly as shown to write natively to the editor. Squeeze will map your files directly to Rojo! Let's say you write a script for the server, you should path it to 'ServerScriptService/CoreLogic.server.luau'. 
+## File Output Format (STRICT)
+When writing code, use this XML tag format. The path must match the Rojo structure:
 
 <file path="ServerScriptService/GameLogic.server.luau">
--- Complete file code goes here
+-- Complete file content here
 </file>
 
-If the user asks you to modify code, rewrite the ENTIRE updated file content within the <file> tags.
-ONLY output the <file> tags if you are writing code. NO CHAT BUBBLES EXPLAINING THE CODE AFTERWARDS. Just write the code natively to the editor.`;
+<file path="ReplicatedStorage/Shared/GameConfig.luau">
+-- Another file here
+</file>
+
+Rules:
+- Paths follow Rojo conventions: \`ServerScriptService/\`, \`StarterPlayer/StarterPlayerScripts/\`, \`ReplicatedStorage/Shared/\`
+- \`.server.luau\` = Script (runs on server only)
+- \`.client.luau\` = LocalScript (runs on client only)
+- \`.luau\` = ModuleScript (required by both sides)
+- If modifying an existing file, output the ENTIRE file — never partial snippets
+- ONLY output \`<file>\` tags when writing code. Do not wrap them in markdown fences.
+- If you have something brief to say (e.g. in planning mode), say it BEFORE the file tags, then write the code. Never explain after.`;
 
       if (activeFile && editorRef.current) {
-        systemPrompt += `\n\nThe user is currently focusing on this file path: '${activeFile.path}'.\nHere is its current content:\n<current_file>\n${editorRef.current.getValue()}\n</current_file>\n`;
+        systemPrompt += `\n\n## Currently Open File
+The user has this file open and focused: \`${activeFile.path}\`
+<current_file path="${activeFile.path}">
+${editorRef.current.getValue()}
+</current_file>
+If the user asks to modify or debug this file, output the full updated version in a \`<file path="${activeFile.path}">\` tag.`;
       }
 
       setMessages(prev => [...prev, { role: 'assistant', content: 'Thinking...' }]);
@@ -1130,12 +1172,17 @@ ONLY output the <file> tags if you are writing code. NO CHAT BUBBLES EXPLAINING 
                 className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[11px] text-lime-400 outline-none cursor-pointer hover:bg-white/10 focus:border-lime-400/50 focus:bg-[#1a1a24] transition-all"
                 title="Select AI Model"
               >
-                <optgroup label="Puter.js Models (Free)">
+                <optgroup label="Puter.js — Free, No Key">
                   {AI_MODELS.filter(m => m.provider === 'puter').map(m => (
                     <option key={m.id} value={m.id}>{m.name}</option>
                   ))}
                 </optgroup>
-                <optgroup label="OpenRouter Models">
+                <optgroup label="g4f.dev — Free, No Key">
+                  {AI_MODELS.filter(m => m.provider === 'g4f').map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="OpenRouter — Needs API Key">
                   {AI_MODELS.filter(m => m.provider === 'openrouter').map(m => (
                     <option key={m.id} value={m.id}>{m.name}</option>
                   ))}
